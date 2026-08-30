@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="DevSangam — real-time collaborative code editor with CRDT sync and sandboxed multi-language execution." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Inline, not in index.css: this has to paint before any external
+         stylesheet (Google Fonts, the app bundle) finishes loading, or a
+         slow/blocked fetch shows the browser's default white canvas for a
+         beat first. Belt-and-suspenders with index.css's own `body` rule,
+         which also covers html — this one can't wait for that file. -->
+    <style>
+      html, body { background-color: #000000; }
+    </style>
+    <title>DevSangam — Code. Collaborate. Create.</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

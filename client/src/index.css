@@ -1,0 +1,141 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------
+   DevSangam design tokens — adapted from atlantic.md's "Midnight
+   Observatory" wireframe system. Electric Cobalt is swapped for Electric
+   Violet (our brand color, matched to the logo); Signal Orange is kept
+   verbatim and reserved for outlined action buttons only, per spec. Names
+   are bespoke (not "slate"/"violet"/"purple") so they don't collide with
+   Tailwind's built-in palettes already used throughout the existing app —
+   these are additive utilities (bg-carbon, text-ice, border-electric-violet,
+   ...), not a replacement of the app's current purple/slate classes.
+   --------------------------------------------------------------------- */
+@theme {
+  --color-void: #000000;
+  --color-carbon: #0d0d0f;
+  --color-graphite: #232529;
+  --color-panel: #2b2f33;
+  --color-iron: #41464c;
+  --color-steel: #565e66;
+  --color-fog: #6c757f;
+  --color-ice: #d8eaff;
+
+  --color-electric-violet: #8b5cf6;
+  --color-bright-violet: #a855f7;
+  --color-deep-violet: #7c3aed;
+  --color-signal-orange: #ff4105;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Syne', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+html {
+  background-color: var(--color-void);
+}
+
+body {
+  font-family: var(--font-sans);
+  /* Base backdrop for every page — matters specifically for pages that
+     layer a fixed, negative-z particle canvas over it (Landing, AuthCard):
+     those pages deliberately don't paint their own opaque background, since
+     an in-flow div's background paints in front of a -z-10 fixed sibling
+     and would hide the canvas behind it. This is the void-black showing
+     through the gaps between particles instead. */
+  background-color: var(--color-void);
+  min-height: 100vh;
+}
+
+/* Scientific-instrument micro-label: STATUS: CONNECTED, EXEC: 409MS, ... */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Dot-grid observatory backdrop — a static CSS approximation of the
+   particle-cloud motif (no canvas/WebGL dependency), vignetted so it
+   recedes behind foreground content instead of competing with it. */
+.observatory-grid {
+  background-image: radial-gradient(circle, rgba(139, 92, 246, 0.35) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, #000 0%, transparent 75%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, #000 0%, transparent 75%);
+}
+
+.ai-markdown h2 {
+  margin: 1rem 0 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #1e293b;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.ai-markdown h2:first-child {
+  margin-top: 0;
+}
+.ai-markdown p {
+  margin-bottom: 0.5rem;
+  line-height: 1.6;
+}
+.ai-markdown ul,
+.ai-markdown ol {
+  margin: 0 0 0.75rem 1.15rem;
+}
+.ai-markdown ul {
+  list-style: disc;
+}
+.ai-markdown ol {
+  list-style: decimal;
+}
+.ai-markdown li {
+  margin-bottom: 0.4rem;
+  line-height: 1.55;
+}
+.ai-markdown li > p {
+  display: inline;
+  margin-bottom: 0;
+}
+.ai-markdown strong {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+.ai-markdown a {
+  color: #c4b5fd;
+  text-decoration: underline;
+}
+.ai-markdown pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
+/* monaco-vim's status bar renders its own DOM into whatever node it's given
+   — styled to match the terminal readout aesthetic rather than its default
+   plain-white CodeMirror look. */
+.vim-status-bar {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 10px;
+  background: var(--color-carbon);
+  color: var(--color-ice);
+  border-top: 1px solid color-mix(in srgb, var(--color-ice) 10%, transparent);
+}
+.vim-status-bar .vim-mode {
+  color: var(--color-electric-violet);
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.yjs-cursor-label {
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: white;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-100%);
+  font-weight: 600;
+}
