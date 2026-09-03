@@ -11,11 +11,21 @@ export default function ToggleSwitch({ checked, onChange, label, description }) 
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition ${checked ? 'bg-electric-violet' : 'bg-graphite'}`}
+        // Track is a real flex container with real padding (p-0.5), not an
+        // absolutely-positioned thumb faking an inset via a hand-picked
+        // translate value — the thumb's resting position (left edge, flush
+        // against the padding) already IS the "OFF" position, so
+        // translate-x-0 leaves it there and translate-x-5 (20px) shifts it
+        // by exactly the thumb's own width. That's what keeps it flush
+        // against the *inner* right edge (still inside the padding) in the
+        // ON state instead of overhanging the track's outer edge.
+        className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors ${
+          checked ? 'bg-electric-violet' : 'bg-graphite'
+        }`}
       >
         <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-ice transition-transform ${
-            checked ? 'translate-x-[18px]' : 'translate-x-0.5'
+          className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+            checked ? 'translate-x-5' : 'translate-x-0'
           }`}
         />
       </button>
