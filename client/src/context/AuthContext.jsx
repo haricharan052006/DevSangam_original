@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { api } from '../lib/api'
@@ -18,6 +18,20 @@ function loadStoredAuth() {
 export function AuthProvider({ children }) {
   const [{ token, user }, setAuth] = useState(loadStoredAuth)
   const navigate = useNavigate()
+
+  // `useNavigate()` hands back a NEW function identity after every location
+  // change — react-router's non-data `useNavigateUnstable` memoizes the
+  // callback on the current pathname — so any effect that lists it as a
+  // dependency re-runs on every client-side navigation in the app. Effects
+  // that only *call* navigate read it through this ref instead, which keeps
+  // them genuinely one-shot. See the OAuth exchange below.
+  const navigateRef = useRef(navigate)
+  useEffect(() => {
+    navigateRef.current = navigate
+  })
+
+  // Latches the single OAuth token -> session exchange for this page load.
+  const oauthExchangeRef = useRef(null)
 
   // Captured once, on the very first render — not inside the effect below.
   // StrictMode (see main.jsx) double-invokes effects in dev: mount, cleanup,
@@ -44,37 +58,50 @@ export function AuthProvider({ children }) {
   // normal email/password login and drop the token off the URL so it can't
   // be re-shared/bookmarked with the redirect-history back button.
   useEffect(() => {
-    if (!oauthToken) return
+    // One exchange per page load, full stop — and `oauthExchangeRef`, not the
+    // dependency array, is what guarantees it. The array can't: `navigate`
+    // used to be listed here, and its identity churns on every location
+    // change (see navigateRef above), so this whole effect re-ran on every
+    // single client-side navigation. `oauthToken` stays latched for the life
+    // of the SPA session, so each of those re-runs fired another /me and, on
+    // success, `navigate('/dashboard', { replace: true })` — which is exactly
+    // why opening a workspace rendered "Loading workspace..." for about one
+    // round-trip and then snapped back to the dashboard, and why a hard
+    // refresh "fixed" it: the reload re-reads a URL whose token param this
+    // effect already stripped, so `oauthToken` comes back null and the whole
+    // thing no-ops.
+    if (!oauthToken || oauthExchangeRef.current) return
 
     // Strip the token from the visible URL immediately (before the async
     // lookup below), rather than after: navigate() further down mutates
     // browser history too, and doing that first would race a later
     // window.history.replaceState() built from the now-stale /login path.
-    // Safe to run twice under StrictMode — deleting an already-absent
-    // 'token' param is a no-op.
     const params = new URLSearchParams(window.location.search)
     params.delete('token')
     const search = params.toString()
     window.history.replaceState({}, '', `${window.location.pathname}${search ? `?${search}` : ''}`)
 
-    let cancelled = false
-    ;(async () => {
+    // Latched in the ref before the first await, and deliberately NOT
+    // cancelled from a cleanup. StrictMode (see main.jsx) double-invokes
+    // effects as mount, cleanup, mount: the guard above already makes the
+    // second invocation a no-op, so a `cancelled` flag set by the cleanup in
+    // between would abort the only exchange that ever starts and leave the
+    // user silently never logged in. Letting the single owning exchange run
+    // to completion — and routing its redirect through navigateRef so it
+    // lands wherever the app currently is — keeps the one-shot guarantee and
+    // the StrictMode fix compatible with each other.
+    oauthExchangeRef.current = (async () => {
       try {
         const data = await api.me(oauthToken)
-        if (cancelled) return
         persist(oauthToken, data.user)
-        navigate('/dashboard', { replace: true })
+        navigateRef.current('/dashboard', { replace: true })
       } catch {
         // Expired/invalid token from the redirect — nothing to recover, but
         // tell the user rather than leaving them silently logged out.
-        if (!cancelled) toast.error('Google sign-in link expired or was already used. Please try again.')
+        toast.error('Google sign-in link expired or was already used. Please try again.')
       }
     })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [oauthToken, persist, navigate])
+  }, [oauthToken, persist])
 
   const login = useCallback(
     async (email, password) => {

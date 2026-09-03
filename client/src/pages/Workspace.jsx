@@ -17,6 +17,7 @@ import {
   Moon,
   Play,
   Presentation,
+  RotateCw,
   Settings,
   Sparkles,
   Sun,
@@ -68,6 +69,8 @@ export default function Workspace() {
   const [theme, setTheme] = useState('devsangam-dark')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [notFound, setNotFound] = useState(false) // true only for a real 404 — see the bootstrap effect
+  const [reloadKey, setReloadKey] = useState(0) // bumped by "Try again" to re-run the bootstrap fetch
   const [showNewFileModal, setShowNewFileModal] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [copied, setCopied] = useState(false)
@@ -174,12 +177,18 @@ export default function Workspace() {
   const ai = useAiAssistant(token)
   const runCodeRef = useRef(() => {})
 
+  // Bootstrap fetch. Guarded on `token` for the same reason useRoomSocket and
+  // useWorkspacePresence are: nothing here should ever go out unauthenticated
+  // and eat a 401 that isn't really about this workspace.
   useEffect(() => {
+    if (!code || !token) return undefined
+
     let cancelled = false
 
     async function load() {
       setLoading(true)
       setError('')
+      setNotFound(false)
       try {
         const data = await api.getWorkspace(token, code)
         if (cancelled) return
@@ -191,7 +200,14 @@ export default function Workspace() {
           setActiveFileId(data.files[0].id)
         }
       } catch (err) {
-        if (!cancelled) setError(err.message || 'Workspace not found')
+        if (cancelled) return
+        // Only a 404 means the room code is genuinely wrong. Everything else
+        // — offline, a 500, a cold-starting server, an expired session — is
+        // transient, and used to land on the same dead-end "Workspace not
+        // found" screen, which read as the workspace having vanished. Those
+        // now keep their real message and offer a retry instead.
+        setNotFound(err.status === 404)
+        setError(err.message || 'Workspace not found')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -201,7 +217,7 @@ export default function Workspace() {
     return () => {
       cancelled = true
     }
-  }, [code, token])
+  }, [code, token, reloadKey])
 
   // live file list — the shared Y.Array (via useWorkspacePresence) is the
   // real-time source of truth once synced, so every connected tab (including
@@ -626,12 +642,22 @@ export default function Workspace() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-void text-ice">
         <p className="text-red-400">{error || 'Workspace not found'}</p>
-        <button
-          onClick={() => navigate('/dashboard')}
-          className="flex items-center gap-2 rounded-lg border border-ice/15 px-3 py-1.5 text-sm text-fog hover:bg-graphite"
-        >
-          <ArrowLeft size={16} /> Back to dashboard
-        </button>
+        <div className="flex items-center gap-2">
+          {!notFound && (
+            <button
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="flex items-center gap-2 rounded-lg border border-ice/15 px-3 py-1.5 text-sm text-fog hover:bg-graphite"
+            >
+              <RotateCw size={16} /> Try again
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 rounded-lg border border-ice/15 px-3 py-1.5 text-sm text-fog hover:bg-graphite"
+          >
+            <ArrowLeft size={16} /> Back to dashboard
+          </button>
+        </div>
       </div>
     )
   }
