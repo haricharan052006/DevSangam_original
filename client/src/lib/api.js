@@ -48,6 +48,12 @@ export const api = {
     request(`/api/workspaces/${roomCode}/files/${fileId}`, { method: 'DELETE', token }),
   setCoOwner: (token, roomCode, userId) =>
     request(`/api/workspaces/${roomCode}/co-owner`, { method: 'PATCH', body: { userId }, token }),
+  updateWorkspace: (token, roomCode, payload) =>
+    request(`/api/workspaces/${roomCode}`, { method: 'PATCH', body: payload, token }),
+  saveWorkspace: (token, roomCode) => request(`/api/workspaces/${roomCode}/save`, { method: 'POST', token }),
+  deleteWorkspace: (token, roomCode) => request(`/api/workspaces/${roomCode}`, { method: 'DELETE', token }),
+  removeWorkspaceMember: (token, roomCode) =>
+    request(`/api/workspaces/${roomCode}/member`, { method: 'DELETE', token }),
 
   analyzeCode: (token, payload) => request('/api/ai/analyze', { method: 'POST', body: payload, token }),
 }

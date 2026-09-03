@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FolderPlus } from 'lucide-react'
 import Modal from './Modal'
 import FormField from './FormField'
+import ToggleSwitch from './ToggleSwitch'
 import { ErrorBox, SubmitButton } from './FormBits'
 import { LANGUAGE_OPTIONS } from '../lib/languages'
 import { usePreferences } from '../hooks/usePreferences'
@@ -11,6 +12,7 @@ export default function CreateWorkspaceModal({ open, onClose, onCreate }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [language, setLanguage] = useState(preferences.defaultLanguage)
+  const [allowMemberSave, setAllowMemberSave] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,10 +25,11 @@ export default function CreateWorkspaceModal({ open, onClose, onCreate }) {
     }
     setLoading(true)
     try {
-      await onCreate({ name: name.trim(), description: description.trim(), language })
+      await onCreate({ name: name.trim(), description: description.trim(), language, allowMemberSave })
       setName('')
       setDescription('')
       setLanguage(preferences.defaultLanguage)
+      setAllowMemberSave(false)
     } catch (err) {
       setError(err.message || 'Failed to create workspace')
     } finally {
@@ -69,6 +72,15 @@ export default function CreateWorkspaceModal({ open, onClose, onCreate }) {
             ))}
           </select>
         </label>
+
+        <div className="rounded-lg border border-ice/15 bg-graphite px-3 py-2">
+          <ToggleSwitch
+            checked={allowMemberSave}
+            onChange={setAllowMemberSave}
+            label="Allow members to save this workspace to their dashboard"
+            description="Anyone with the room code can pin it to their own dashboard for quick access later."
+          />
+        </div>
 
         {error && <ErrorBox message={error} />}
         <SubmitButton loading={loading} label="Create workspace" loadingLabel="Creating..." icon={FolderPlus} />

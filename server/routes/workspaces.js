@@ -60,7 +60,7 @@ async function getWorkspaceByCode(roomCode) {
 }
 
 router.post('/', async (req, res) => {
-  const { name, description, language } = req.body || {};
+  const { name, description, language, allowMemberSave } = req.body || {};
 
   if (!name || !name.trim()) {
     return res.status(400).json({ error: 'Workspace name is required' });
@@ -70,12 +70,13 @@ router.post('/', async (req, res) => {
     const roomCode = await generateRoomCode();
     const template = STARTER_TEMPLATES[language] || STARTER_TEMPLATES.javascript;
     const starterLanguage = STARTER_TEMPLATES[language] ? language : 'javascript';
+    const settings = { allowMemberSave: Boolean(allowMemberSave) };
 
     const wsResult = await db.query(
-      `INSERT INTO workspaces (id, title, description, owner_id, language)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO workspaces (id, title, description, owner_id, language, settings)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING ${WORKSPACE_COLUMNS}`,
-      [roomCode, name.trim(), description ? description.trim() : null, req.user.id, starterLanguage]
+      [roomCode, name.trim(), description ? description.trim() : null, req.user.id, starterLanguage, JSON.stringify(settings)]
     );
     const workspace = wsResult.rows[0];
 
@@ -97,8 +98,17 @@ router.post('/', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
+    // Owned, co-owned, or explicitly saved via workspace_members (the
+    // "Add to Dashboard" flow below) — one query against `workspaces`, so no
+    // join/dedup is needed even though a row can satisfy more than one of
+    // those conditions at once.
     const wsResult = await db.query(
-      `SELECT ${WORKSPACE_COLUMNS} FROM workspaces WHERE owner_id = $1 OR co_owner_id = $1 ORDER BY created_at DESC`,
+      `SELECT ${WORKSPACE_COLUMNS}
+       FROM workspaces
+       WHERE owner_id = $1
+          OR co_owner_id = $1
+          OR id IN (SELECT workspace_id FROM workspace_members WHERE user_id = $1)
+       ORDER BY created_at DESC`,
       [req.user.id]
     );
 
@@ -106,7 +116,8 @@ router.get('/', async (req, res) => {
       wsResult.rows.map(async (ws) => {
         const fileRows = await db.query('SELECT language FROM files WHERE workspace_id = $1', [ws.id]);
         const languages = [...new Set(fileRows.rows.map((f) => f.language).filter(Boolean))];
-        return { ...ws, languages, fileCount: fileRows.rows.length };
+        const role = ws.ownerId === req.user.id ? 'owner' : ws.coOwnerId === req.user.id ? 'coOwner' : 'member';
+        return { ...ws, languages, fileCount: fileRows.rows.length, isOwner: role === 'owner', role };
       })
     );
 
@@ -128,10 +139,138 @@ router.get('/:roomCode', async (req, res) => {
     const roles = governance.getAllRoles(workspace.roomCode);
     const presentationMode = governance.getPresentationMode(workspace.roomCode);
     const myRole = governance.getEffectiveRole(workspace, req.user.id);
-    res.json({ workspace, files: filesResult.rows, roles, presentationMode, myRole });
+    const savedResult = await db.query('SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2', [
+      workspace.id,
+      req.user.id,
+    ]);
+    const isSaved = savedResult.rows.length > 0;
+    res.json({ workspace, files: filesResult.rows, roles, presentationMode, myRole, isSaved });
   } catch (err) {
     console.error(`[workspaces] get failed: ${err.message}`);
     res.status(500).json({ error: 'Failed to load workspace' });
+  }
+});
+
+// Lets a non-owner collaborator pin a workspace they were invited into (via
+// room code) onto their own dashboard, gated by the owner's per-workspace
+// `settings.allowMemberSave` flag set at creation time (CreateWorkspaceModal).
+router.post('/:roomCode/save', async (req, res) => {
+  try {
+    const workspace = await getWorkspaceByCode(req.params.roomCode);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    // The owner's own workspaces already surface on their dashboard via
+    // `owner_id = $1` in GET / — nothing to save.
+    if (workspace.ownerId === req.user.id) {
+      return res.json({ success: true, message: 'Workspace added to dashboard' });
+    }
+
+    if (!workspace.settings?.allowMemberSave) {
+      return res.status(403).json({ error: 'Owner has disabled saving this workspace to dashboard' });
+    }
+
+    await db.query(
+      `INSERT INTO workspace_members (workspace_id, user_id, role)
+       VALUES ($1, $2, 'editor')
+       ON CONFLICT (workspace_id, user_id) DO NOTHING`,
+      [workspace.id, req.user.id]
+    );
+
+    console.log(`[workspaces] user ${req.user.id} saved workspace ${workspace.roomCode} to their dashboard`);
+    res.json({ success: true, message: 'Workspace added to dashboard' });
+  } catch (err) {
+    console.error(`[workspaces] save failed: ${err.message}`);
+    res.status(500).json({ error: 'Failed to save workspace' });
+  }
+});
+
+router.patch('/:roomCode', async (req, res) => {
+  try {
+    const workspace = await getWorkspaceByCode(req.params.roomCode);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    const role = governance.getEffectiveRole(workspace, req.user.id);
+    if (!governance.isModerator(role)) {
+      return res.status(403).json({ error: 'Only the owner or co-owner can edit this workspace' });
+    }
+
+    const { name, description } = req.body || {};
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName || trimmedName.length > 60) {
+      return res.status(400).json({ error: 'Workspace name must be between 1 and 60 characters' });
+    }
+    // `description` is optional on this endpoint — omitting it (as the
+    // inline header-title editor in Workspace.jsx does, which only ever
+    // changes the name) leaves the existing description untouched rather
+    // than nulling it out; an explicit empty string still clears it.
+    const trimmedDescription = description === undefined ? workspace.description : String(description).trim() || null;
+
+    const updated = await db.query(
+      `UPDATE workspaces SET title = $1, description = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING ${WORKSPACE_COLUMNS}`,
+      [trimmedName, trimmedDescription, workspace.id]
+    );
+    const nextWorkspace = updated.rows[0];
+
+    broadcastToRoom(workspace.roomCode, { type: 'workspace:updated', workspace: nextWorkspace, byUserId: req.user.id });
+    console.log(`[workspaces] ${workspace.roomCode} renamed to "${trimmedName}" by user ${req.user.id}`);
+
+    res.json({ workspace: nextWorkspace });
+  } catch (err) {
+    console.error(`[workspaces] update failed: ${err.message}`);
+    res.status(500).json({ error: 'Failed to update workspace' });
+  }
+});
+
+router.delete('/:roomCode/member', async (req, res) => {
+  try {
+    const workspace = await getWorkspaceByCode(req.params.roomCode);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+
+    await db.query('DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2', [
+      workspace.id,
+      req.user.id,
+    ]);
+    console.log(`[workspaces] user ${req.user.id} removed workspace ${workspace.roomCode} from their dashboard`);
+    res.json({ message: 'Removed from dashboard' });
+  } catch (err) {
+    console.error(`[workspaces] remove member failed: ${err.message}`);
+    res.status(500).json({ error: 'Failed to remove workspace from dashboard' });
+  }
+});
+
+router.delete('/:roomCode', async (req, res) => {
+  try {
+    const workspace = await getWorkspaceByCode(req.params.roomCode);
+    if (!workspace) {
+      return res.status(404).json({ error: 'Workspace not found' });
+    }
+    if (workspace.ownerId !== req.user.id) {
+      return res.status(403).json({ error: 'Only the owner can delete this workspace' });
+    }
+
+    // Broadcast before the row (and its cascaded files/members) is actually
+    // gone, so every connected peer's Workspace.jsx still has a live socket
+    // to receive it on and can navigate itself away — see the
+    // 'workspace:deleted' handler there.
+    broadcastToRoom(workspace.roomCode, { type: 'workspace:deleted', byUserId: req.user.id });
+
+    // ON DELETE CASCADE on files.workspace_id and workspace_members.workspace_id
+    // (see server/db/index.js SCHEMA_SQL) takes care of both in the same statement.
+    await db.query('DELETE FROM workspaces WHERE id = $1', [workspace.id]);
+    console.log(`[workspaces] deleted workspace ${workspace.roomCode} by user ${req.user.id}`);
+
+    res.json({ message: 'Workspace deleted' });
+  } catch (err) {
+    console.error(`[workspaces] delete failed: ${err.message}`);
+    res.status(500).json({ error: 'Failed to delete workspace' });
   }
 });
 

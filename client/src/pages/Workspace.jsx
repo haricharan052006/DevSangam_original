@@ -8,6 +8,9 @@ import { saveAs } from 'file-saver'
 import toast from 'react-hot-toast'
 import {
   ArrowLeft,
+  Bookmark,
+  BookmarkCheck,
+  BookmarkPlus,
   Check,
   Copy,
   Download,
@@ -15,6 +18,7 @@ import {
   Loader2,
   LogOut,
   Moon,
+  Pencil,
   Play,
   Presentation,
   RotateCw,
@@ -81,6 +85,11 @@ export default function Workspace() {
   const [aiOpen, setAiOpen] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [showAccountSettings, setShowAccountSettings] = useState(false)
+  const [saved, setSaved] = useState(false) // this user already has the workspace saved to their dashboard
+  const [savingWorkspace, setSavingWorkspace] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const [savingTitle, setSavingTitle] = useState(false)
 
   const editorRef = useRef(null)
   const monacoRef = useRef(null)
@@ -177,6 +186,22 @@ export default function Workspace() {
   const ai = useAiAssistant(token)
   const runCodeRef = useRef(() => {})
 
+  // Live rename/delete pushed from PATCH/DELETE /api/workspaces/:roomCode
+  // (server/routes/workspaces.js), which broadcast over this same /exec
+  // socket rather than requiring every connected tab to poll or refetch.
+  useEffect(() => {
+    if (!roomSocket) return undefined
+    return roomSocket.subscribe((msg) => {
+      if (msg.type === 'workspace:updated') {
+        setWorkspace((prev) => (prev ? { ...prev, ...msg.workspace } : msg.workspace))
+        if (msg.byUserId !== user?.id) toast(`Workspace renamed to "${msg.workspace.name}"`)
+      } else if (msg.type === 'workspace:deleted') {
+        if (msg.byUserId !== user?.id) toast.error('This workspace was deleted by the owner')
+        navigate('/dashboard')
+      }
+    })
+  }, [roomSocket, user?.id, navigate])
+
   // Bootstrap fetch. Guarded on `token` for the same reason useRoomSocket and
   // useWorkspacePresence are: nothing here should ever go out unauthenticated
   // and eat a 401 that isn't really about this workspace.
@@ -195,6 +220,7 @@ export default function Workspace() {
         setWorkspace(data.workspace)
         setWorkspaceMeta(data)
         setFiles(data.files)
+        setSaved(Boolean(data.isSaved))
         if (data.files.length > 0) {
           setOpenFileIds([data.files[0].id])
           setActiveFileId(data.files[0].id)
@@ -608,6 +634,55 @@ export default function Workspace() {
     })
   }
 
+  async function handleSaveToDashboard() {
+    setSavingWorkspace(true)
+    try {
+      await api.saveWorkspace(token, code)
+      setSaved(true)
+      toast.success('Workspace added to dashboard')
+    } catch (err) {
+      toast.error(err.message || 'Failed to save workspace')
+    } finally {
+      setSavingWorkspace(false)
+    }
+  }
+
+  function handleStartEditTitle() {
+    setTitleDraft(workspace.name)
+    setEditingTitle(true)
+  }
+
+  function handleCancelEditTitle() {
+    setEditingTitle(false)
+  }
+
+  // Only `name` goes in the request body — the backend PATCH treats a
+  // missing `description` as "leave it alone" (see server/routes/workspaces.js),
+  // so this inline rename can't accidentally wipe the description set via
+  // Dashboard's fuller Edit Workspace modal.
+  async function handleSaveTitle() {
+    const trimmed = titleDraft.trim()
+    if (!trimmed) {
+      toast.error('Workspace name is required')
+      return
+    }
+    if (trimmed === workspace.name) {
+      setEditingTitle(false)
+      return
+    }
+    setSavingTitle(true)
+    try {
+      const data = await api.updateWorkspace(token, code, { name: trimmed })
+      setWorkspace(data.workspace)
+      setEditingTitle(false)
+      toast.success('Workspace renamed')
+    } catch (err) {
+      toast.error(err.message || 'Failed to rename workspace')
+    } finally {
+      setSavingTitle(false)
+    }
+  }
+
   function handleCopyEditorContent() {
     if (!activeFile) return
     const content = collabRef.current?.ytext ? collabRef.current.ytext.toString() : ''
@@ -673,7 +748,51 @@ export default function Workspace() {
             <ArrowLeft size={20} />
           </button>
           <div>
-            <h1 className="font-semibold">{workspace.name}</h1>
+            {editingTitle ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle()
+                    if (e.key === 'Escape') handleCancelEditTitle()
+                  }}
+                  maxLength={60}
+                  disabled={savingTitle}
+                  className="rounded-md border border-electric-violet/50 bg-graphite px-2 py-1 text-sm font-semibold text-ice outline-none focus:ring-1 focus:ring-electric-violet disabled:opacity-60"
+                />
+                <button
+                  onClick={handleSaveTitle}
+                  disabled={savingTitle}
+                  title="Save"
+                  className="rounded-md border border-ice/15 p-1 text-emerald-400 hover:bg-graphite disabled:opacity-50"
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  onClick={handleCancelEditTitle}
+                  disabled={savingTitle}
+                  title="Cancel"
+                  className="rounded-md border border-ice/15 p-1 text-fog hover:bg-graphite disabled:opacity-50"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <h1 className="font-semibold">{workspace.name}</h1>
+                {governance.isModerator && (
+                  <button
+                    onClick={handleStartEditTitle}
+                    title="Rename workspace"
+                    className="rounded-md p-1 text-steel hover:bg-graphite hover:text-ice"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
               <button
                 onClick={handleCopyCode}
@@ -730,6 +849,29 @@ export default function Workspace() {
               <Presentation size={12} /> Presentation Mode
             </span>
           )}
+
+          {governance.myRole !== 'owner' &&
+            (saved ? (
+              <span className="flex items-center gap-2 rounded-lg border border-emerald-900 bg-emerald-950/30 px-3 py-1.5 text-sm text-emerald-300">
+                <BookmarkCheck size={16} /> Saved in Dashboard
+              </span>
+            ) : workspace.settings?.allowMemberSave ? (
+              <button
+                onClick={handleSaveToDashboard}
+                disabled={savingWorkspace}
+                className="flex items-center gap-2 rounded-lg border border-electric-violet/50 px-3 py-1.5 text-sm text-electric-violet transition hover:bg-electric-violet/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingWorkspace ? <Loader2 size={16} className="animate-spin" /> : <BookmarkPlus size={16} />}
+                Add to Dashboard
+              </button>
+            ) : (
+              <span
+                title="The workspace owner has disabled saving this workspace to dashboards"
+                className="flex items-center gap-2 rounded-lg border border-ice/10 px-3 py-1.5 text-sm text-steel opacity-60"
+              >
+                <Bookmark size={16} /> Saving disabled by owner
+              </span>
+            ))}
 
           <button
             onClick={() => setShowMembersModal(true)}

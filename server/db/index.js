@@ -106,6 +106,31 @@ async function migrateUsersTable() {
   }
 }
 
+// A member can only ever have one row per workspace — the "save to
+// dashboard" endpoint relies on that via `ON CONFLICT (workspace_id,
+// user_id) DO NOTHING` to make re-saving an already-saved workspace a
+// harmless no-op instead of piling up duplicate rows. CREATE TABLE IF NOT
+// EXISTS above won't retrofit this onto a table that already existed
+// without it, so it's added the same way migrateUsersTable evolves `users`.
+async function migrateWorkspaceMembersTable() {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM pg_constraint WHERE conname = 'workspace_members_workspace_user_unique'`
+  );
+  if (rows.length > 0) return;
+
+  console.log('[db] migrating workspace_members: enforcing one row per (workspace, user)');
+  // Collapse any pre-existing duplicates first — ADD CONSTRAINT UNIQUE fails
+  // outright if the table already violates it.
+  await pool.query(`
+    DELETE FROM workspace_members a USING workspace_members b
+    WHERE a.id > b.id AND a.workspace_id = b.workspace_id AND a.user_id = b.user_id
+  `);
+  await pool.query(
+    `ALTER TABLE workspace_members
+       ADD CONSTRAINT workspace_members_workspace_user_unique UNIQUE (workspace_id, user_id)`
+  );
+}
+
 // Cached so repeated requires (or an accidental second call) don't re-issue
 // the schema DDL — call and await this once, from index.js at startup,
 // before the HTTP server starts accepting requests.
@@ -115,6 +140,7 @@ function initDb() {
     initPromise = pool
       .query(SCHEMA_SQL)
       .then(() => migrateUsersTable())
+      .then(() => migrateWorkspaceMembersTable())
       .then(() => {
         console.log('[db] schema ready (Postgres)');
       });
