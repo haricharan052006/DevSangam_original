@@ -30,11 +30,20 @@ function buildTranscript({ running, liveEvents, result }) {
   return ''
 }
 
+// Comfortable default/floor for the expanded panel — collapsing must never
+// leave the panel able to reopen any shorter than this.
+const COMFORTABLE_HEIGHT = 280
+const MIN_OPEN_HEIGHT = 260
+const COLLAPSED_HEIGHT = 40 // header bar only
+
 export default function TerminalPanel({ running, result, liveEvents, onClear, onSendStdin, canSendStdin }) {
   // Purely local UI state — each collaborator's own client decides whether
   // their console is collapsed; it's never synced over the room socket, so
   // one person minimizing their view doesn't touch anyone else's.
   const [collapsed, setCollapsed] = useState(false)
+  // The panel's expanded height, untouched by collapsing — reopening always
+  // restores this, never the collapsed header-only height.
+  const [openHeight] = useState(COMFORTABLE_HEIGHT)
   const [stdinDraft, setStdinDraft] = useState('')
   const [consoleCopied, setConsoleCopied] = useState(false)
   const outputRef = useRef(null)
@@ -71,8 +80,11 @@ export default function TerminalPanel({ running, result, liveEvents, onClear, on
   }
 
   return (
-    <div className="flex flex-col border-t border-ice/10 bg-void">
-      <div className="flex items-center justify-between border-b border-ice/10 px-3 py-1.5">
+    <div
+      className="flex shrink-0 flex-col overflow-hidden border-t border-ice/10 bg-void transition-[height] duration-200 ease-in-out"
+      style={{ height: collapsed ? COLLAPSED_HEIGHT : Math.max(openHeight, MIN_OPEN_HEIGHT) }}
+    >
+      <div className="flex shrink-0 items-center justify-between border-b border-ice/10 px-3 py-1.5">
         <button onClick={() => setCollapsed((c) => !c)} className="flex items-center gap-2 text-fog hover:text-ice">
           <ChevronDown size={14} className={`transition-transform duration-200 ${collapsed ? '-rotate-180' : ''}`} />
           <span className="label-mono">Console</span>
@@ -132,41 +144,37 @@ export default function TerminalPanel({ running, result, liveEvents, onClear, on
         </button>
       </div>
 
-      {/* Height (not mount/unmount) is what's animated, so the collapse has
-          something to transition — a conditionally-rendered block would just
-          pop in/out with no transition to play. */}
-      <div
-        className={`overflow-hidden transition-[max-height] duration-200 ease-in-out ${
-          collapsed ? 'max-h-0' : 'max-h-56'
-        }`}
-      >
-        <div ref={outputRef} className="h-56 overflow-y-auto px-3 py-2 font-mono text-xs leading-relaxed">
-          {!hasContent && <p className="text-steel">Run your code (Ctrl+Enter) to see output here.</p>}
+      {/* Panel height (not mount/unmount) is what's animated on the outer
+          wrapper, so this area just fills whatever space is left — a
+          conditionally-rendered block would pop in/out with no transition
+          to play, and a second fixed height here would fight the wrapper's
+          and clip content to whichever is smaller. */}
+      <div ref={outputRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-xs leading-relaxed">
+        {!hasContent && <p className="text-steel">Run your code (Ctrl+Enter) to see output here.</p>}
 
-          {running && liveEvents.map((event) => <LiveEventLine key={event.id} event={event} />)}
-          {running && liveEvents.length === 0 && <p className="text-steel">Waiting for output...</p>}
+        {running && liveEvents.map((event) => <LiveEventLine key={event.id} event={event} />)}
+        {running && liveEvents.length === 0 && <p className="text-steel">Waiting for output...</p>}
 
-          {!running && result?.stdout && <pre className="whitespace-pre-wrap break-words text-ice">{result.stdout}</pre>}
-          {!running && result?.stderr && <pre className="whitespace-pre-wrap break-words text-red-400">{result.stderr}</pre>}
+        {!running && result?.stdout && <pre className="whitespace-pre-wrap break-words text-ice">{result.stdout}</pre>}
+        {!running && result?.stderr && <pre className="whitespace-pre-wrap break-words text-red-400">{result.stderr}</pre>}
 
-          {/* The interactive prompt lives inside the scrollback itself, at
-              the end of it — so it reads as the terminal waiting for you to
-              type the next line, not a separate form bolted underneath. */}
-          {running && (
-            <div className="flex items-center gap-1.5 text-cyan-400">
-              <span className="shrink-0">&gt;</span>
-              <input
-                value={stdinDraft}
-                onChange={(e) => setStdinDraft(e.target.value)}
-                onKeyDown={handleInputKeyDown}
-                disabled={!canSendStdin}
-                placeholder={canSendStdin ? 'Type input and press Enter...' : 'Viewer — cannot send input'}
-                autoFocus={!collapsed}
-                className="min-w-0 flex-1 border-none bg-transparent font-mono text-xs text-cyan-300 placeholder-steel caret-cyan-400 outline-none disabled:cursor-not-allowed"
-              />
-            </div>
-          )}
-        </div>
+        {/* The interactive prompt lives inside the scrollback itself, at
+            the end of it — so it reads as the terminal waiting for you to
+            type the next line, not a separate form bolted underneath. */}
+        {running && (
+          <div className="flex items-center gap-1.5 text-cyan-400">
+            <span className="shrink-0">&gt;</span>
+            <input
+              value={stdinDraft}
+              onChange={(e) => setStdinDraft(e.target.value)}
+              onKeyDown={handleInputKeyDown}
+              disabled={!canSendStdin}
+              placeholder={canSendStdin ? 'Type input and press Enter...' : 'Viewer — cannot send input'}
+              autoFocus={!collapsed}
+              className="min-w-0 flex-1 border-none bg-transparent font-mono text-xs text-cyan-300 placeholder-steel caret-cyan-400 outline-none disabled:cursor-not-allowed"
+            />
+          </div>
+        )}
       </div>
     </div>
   )

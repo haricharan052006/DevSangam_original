@@ -978,7 +978,7 @@ export default function Workspace() {
             </div>
           )}
 
-          <div className="relative flex-1">
+          <div className="relative min-h-0 flex-1">
             <Editor
               height="100%"
               theme={theme}
