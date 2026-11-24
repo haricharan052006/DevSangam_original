@@ -1,1 +1,2 @@
-The system uses a three-tier architecture: Vercel delivers the static React frontend over a global edge CDN, Render runs the persistent Node.js/Express service required to sustain long-lived WebSocket connections for CRDT sync, and Supabase provides a managed PostgreSQL layer with built-in connection pooling for durable relational storage and authentication records.
+The system uses a three-tier architecture: Vercel delivers the static React frontend over a global edge CDN, Render runs the persistent Node.js/Express service required to sustain long-lived WebSocket connections for CRDT sync, and Supabase provides a managed PostgreSQL layer with built-in connection pooling for durable relational storage and authentication records. https://dev-sangam-original.vercel.app 
+
